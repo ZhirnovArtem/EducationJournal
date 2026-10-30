@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # 1. База данных
+  db:
+    image: postgres:15-alpine
+    container_name: alpha-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: education
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Монтируем ваш init.sql для автоматического создания таблиц
+      - ../db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - alpha-net
+
+  # 2. .NET Приложение
+  app:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    container_name: alpha-app
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "8080:8080" # Пробрасываем порт на ваш ПК (чтобы можно было зайти на http://localhost:8080)
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      # Переопределяем строку подключения (обратите внимание на Host=db)
+      - ConnectionStrings__Default=Host=db;Port=5432;Database=education;Username=app;Password=secret;
+      # Переопределяем путь для файлов, чтобы он вел на примонтированную папку
+      - Storage__LocalRoot=/app/uploads
+    volumes:
+      # Монтируем папку uploads (проверьте путь на вашем ПК)
+      - ../src/EducationServer.Api/uploads:/app/uploads
+    networks:
+      - alpha-net
+
+  # 3. Cloudflare Tunnel (если нужен)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: alpha-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://app:8080
+    depends_on:
+      - app
+    networks:
+      - alpha-net
+
+networks:
+  alpha-net:
+    driver: bridge
+
+volumes:
+  pgdata:
